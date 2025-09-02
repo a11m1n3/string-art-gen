@@ -53,6 +53,34 @@ svg {
     width: 76vw;
 }
 
+#debug {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 24vw;
+    overflow-y: auto;
+    background: rgba(0,0,0,0.8);
+    color: #0ff;
+    font-family: monospace;
+    font-size: 12px;
+    padding: 8px 12px;
+    border-left: 1px solid #0ff;
+    z-index: 9999;
+    pointer-events: all;
+}
+
+#debug.collapsed {
+    width: 0;
+    padding: 0;
+    border-left: none;
+    overflow: hidden;
+}
+
+#debug-toggle { display: none; }
+
+#debug.collapsed + #debug-toggle { display: none; }
+
 h1 {
     margin-top: 0px;
     font-size: 1.9em;
@@ -81,6 +109,14 @@ canvas {
 .text_entry {
     min-height: 20px;
     overflow: wrap;
+}
+
+.number_entry {
+    width: 100%;
+    background: none;
+    color: #0ff;
+    border: 1px solid #0ff;
+    padding: 4px 6px;
 }
 
 #regenerate {

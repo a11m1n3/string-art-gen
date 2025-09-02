@@ -4,6 +4,27 @@
 // https://gist.github.com/xposedbones/75ebaef3c10060a3ee3b246166caab56
 const constrain = (val, min, max) => (val < min ? min : (val > max ? max : val))
 const map = (value, x1, y1, x2, y2) => (value - x1) * (y2 - x2) / (y1 - x1) + x2;
+const CM_PER_INCH = 2.54;
+const cmToInches = (cm) => cm / CM_PER_INCH;
+
+// Debug logger (initialize early to avoid TDZ issues)
+var debugEl = null;
+function debugLog(msg, obj) {
+    try {
+        if (!debugEl) debugEl = document.getElementById('debug');
+        const time = new Date().toISOString();
+        const line = `[${time}] ${msg}` + (obj !== undefined ? `: ${JSON.stringify(obj)}` : '');
+        if (debugEl) {
+            const p = document.createElement('div');
+            p.textContent = line;
+            debugEl.appendChild(p);
+            debugEl.scrollTop = debugEl.scrollHeight;
+        }
+        console.log(msg, obj);
+    } catch (e) {
+        console.log(msg);
+    }
+}
 
 /**
  * GRAPHING
@@ -16,6 +37,47 @@ class Color {
         this.g = g;
         this.a = a;
     }
+}
+
+// Convert HSL to RGB and generate palettes
+function hslToRgb(h, s, l) {
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const hp = h / 60;
+    const x = c * (1 - Math.abs((hp % 2) - 1));
+    let r1 = 0, g1 = 0, b1 = 0;
+    if (hp >= 0 && hp < 1) { r1 = c; g1 = x; b1 = 0; }
+    else if (hp >= 1 && hp < 2) { r1 = x; g1 = c; b1 = 0; }
+    else if (hp >= 2 && hp < 3) { r1 = 0; g1 = c; b1 = x; }
+    else if (hp >= 3 && hp < 4) { r1 = 0; g1 = x; b1 = c; }
+    else if (hp >= 4 && hp < 5) { r1 = x; g1 = 0; b1 = c; }
+    else if (hp >= 5 && hp < 6) { r1 = c; g1 = 0; b1 = x; }
+    const m = l - c / 2;
+    const r = Math.round((r1 + m) * 255);
+    const g = Math.round((g1 + m) * 255);
+    const b = Math.round((b1 + m) * 255);
+    return { r, g, b };
+}
+
+function generatePalette(numColors) {
+    const colors = [];
+    const n = parseInt(numColors);
+    if (n <= 0) return colors;
+    if (n === 1) return [new Color(0, 0, 0, 255)];
+    if (n === 2) return [new Color(0, 0, 0, 255), new Color(255, 255, 255, 255)];
+    if (n === 3) return [new Color(255, 0, 0, 255), new Color(0, 255, 0, 255), new Color(0, 0, 255, 255)];
+    if (n === 5) return [
+        new Color(0, 255, 255, 255),
+        new Color(255, 0, 255, 255),
+        new Color(255, 255, 0, 255),
+        new Color(0, 0, 0, 255),
+        new Color(255, 255, 255, 255)
+    ];
+    for (let i = 0; i < n; i++) {
+        const h = (i / n) * 360;
+        const { r, g, b } = hslToRgb(h, 1, 0.5);
+        colors.push(new Color(r, g, b, 255));
+    }
+    return colors;
 }
 
 class Point {
@@ -196,9 +258,23 @@ let graph = {
     init() {
         this.render_timeout_id = null;
         this.render_iter = 0;
-        this.width = 30;
-        this.height = this.width;
-        this.radius = this.width / 3;
+        const shape = GUI.frame_shape ? GUI.frame_shape.element.value : "circle";
+        if (shape === "circle") {
+            const diameter_cm = GUI.circle_diameter_cm ? parseFloat(GUI.circle_diameter_cm.element.value) : 76.2;
+            const diameter_in = cmToInches(diameter_cm);
+            this.radius = diameter_in / 2;
+            // Match previous layout: viewBox dimension = radius * 3 (gives margin = radius/2)
+            this.width = this.radius * 3;
+            this.height = this.width;
+        } else {
+            const rect_w_cm = GUI.rect_width_cm ? parseFloat(GUI.rect_width_cm.element.value) : 60;
+            const rect_h_cm = GUI.rect_height_cm ? parseFloat(GUI.rect_height_cm.element.value) : 40;
+            this.rect_w_in = cmToInches(rect_w_cm);
+            this.rect_h_in = cmToInches(rect_h_cm);
+            const pad = Math.max(this.rect_w_in, this.rect_h_in) / 4; // similar padding as circle
+            this.width = this.rect_w_in + pad * 2;
+            this.height = this.rect_h_in + pad * 2;
+        }
         this.max_iter = GUI.num_connections.element.value;
         this.num_nails = GUI.num_nails.element.value;
 
@@ -219,12 +295,25 @@ let graph = {
         this.svg.append("g");
         this.svg.attr("desc", "Created using michael-crum.com/string-art-gen");
 
-        let frame_path = this.svg.select("g")
-            .append("circle")
-            .attr("r", this.radius)
-            .style("stroke", "#ffbe5700")
-            .style("stroke-width", 10)
-            .style("fill", "none");
+        let frame_path;
+        if (shape === "circle") {
+            frame_path = this.svg.select("g")
+                .append("circle")
+                .attr("r", this.radius)
+                .style("stroke", "#ffbe5700")
+                .style("stroke-width", 10)
+                .style("fill", "none");
+        } else {
+            frame_path = this.svg.select("g")
+                .append("rect")
+                .attr("width", this.rect_w_in)
+                .attr("height", this.rect_h_in)
+                .attr("x", -this.rect_w_in / 2)
+                .attr("y", -this.rect_h_in / 2)
+                .style("stroke", "#ffbe5700")
+                .style("stroke-width", 10)
+                .style("fill", "none");
+        }
 
         // let frame_path = this.svg.append("g")
         //     .lower()
@@ -244,7 +333,13 @@ let graph = {
         for (let i = 0; i < this.num_nails; i++) {
             nails_lst.push(i);
         }
-        let frame_length = frame_path.node().getTotalLength();
+        let frame_length = 0;
+        try {
+            frame_length = frame_path.node().getTotalLength();
+        } catch (e) {
+            debugLog('Failed to get frame length', { error: e && (e.message || String(e)) });
+            frame_length = 1;
+        }
 
         // Append nails evenly around the frame, and store their locations in a list
         let nails = this.svg.select("g")
@@ -272,6 +367,7 @@ let graph = {
             .text(function (d, i) { return i });
 
         this.get_frame_url();
+        debugLog('Frame ready', { shape: shape, viewBox: { w: this.width, h: this.height }, nails: this.num_nails });
         frame_path.style("fill", "grey");
 
         // Handle zooming and panning
@@ -374,13 +470,8 @@ let graph = {
         this.orig_ctx_data = this.orig_ctx.getImageData(0, 0, this.img.width, this.img.height).data;
         this.current_ctx_data = this.current_ctx.getImageData(0, 0, this.img.width, this.img.height).data;
 
-        this.threads = [
-            new Thread(0, new Color(0, 255, 255, 255)), // C
-            new Thread(0, new Color(255, 0, 255, 255)), // Y
-            new Thread(0, new Color(255, 255, 0, 255)), // M
-            new Thread(0, new Color(0, 0, 0, 255)), // black
-            new Thread(0, new Color(255, 255, 255, 255)) // white
-        ];
+        const palette = generatePalette(GUI.num_colors ? GUI.num_colors.element.value : 5);
+        this.threads = palette.map(c => new Thread(0, c));
         this.svg.select("g")
             .selectAll(".string")
             .remove();
@@ -423,13 +514,21 @@ let graph = {
         }
 
         this.render_iter++;
-        this.render_timeout_id = setTimeout(() => { this.parse_image() }, 0);
+        this.render_timeout_id = setTimeout(() => {
+            try {
+                this.parse_image()
+            } catch (e) {
+                debugLog('parse_image loop error', { error: e && (e.stack || e.message || String(e)) });
+                this.clean();
+            }
+        }, 0);
     },
 
     clean() {
         GUI.regenerate.element.innerHTML = "<b>Regenerate</b>";
         clearTimeout(this.render_timeout_id);
         console.log(this.threads);
+        debugLog('Render complete', { strings: this.thread_order.length });
         this.svg.selectAll("g circle.nail").raise();
     }
 };
@@ -453,7 +552,7 @@ class UIElement {
 }
 
 class Slider extends UIElement {
-    constructor(desc, name, parent, init_val, min, max, callback) {
+    constructor(desc, name, parent, init_val, min, max, callback, step) {
         super(desc, name, parent, callback, true);
         this.val = init_val;
         this.min = min;
@@ -468,8 +567,33 @@ class Slider extends UIElement {
         this.element.min = min;
         this.element.max = max;
         this.element.value = this.val;
-        this.element.addEventListener("input", (e) => { callback(e); this.disp.innerHTML = e.target.value; });
+        if (step !== undefined) this.element.step = step;
+        // Paired number input
+        this.number = document.createElement("input");
+        this.number.type = "number";
+        this.number.min = min;
+        this.number.max = max;
+        this.number.value = this.val;
+        this.number.step = (step !== undefined ? step : 1);
+        this.number.classList.add("number_entry");
+
+        // Sync slider -> number
+        this.element.addEventListener("input", (e) => {
+            this.number.value = e.target.value;
+            callback(e);
+            this.disp.innerHTML = e.target.value;
+        });
+        // Sync number -> slider
+        this.number.addEventListener("input", (e) => {
+            let v = parseFloat(e.target.value);
+            if (!Number.isFinite(v)) return;
+            v = constrain(v, parseFloat(this.min), parseFloat(this.max));
+            this.element.value = v;
+            this.disp.innerHTML = v;
+            callback({ target: { value: String(v) } });
+        });
         parent.appendChild(this.element);
+        parent.appendChild(this.number);
     }
 }
 
@@ -490,6 +614,23 @@ class TextEntry extends UIElement {
         this.element = document.createElement("input");
         this.element.type = "text";
         this.element.value = value;
+        parent.appendChild(this.element);
+    }
+}
+
+class Select extends UIElement {
+    constructor(desc, name, parent, options, init_val, callback) {
+        super(desc, name, parent, callback, true);
+        this.element = document.createElement("select");
+        this.element.id = name;
+        options.forEach(opt => {
+            const o = document.createElement("option");
+            o.value = opt.value;
+            o.innerText = opt.label;
+            this.element.appendChild(o);
+        });
+        this.element.value = init_val;
+        this.element.addEventListener("change", callback);
         parent.appendChild(this.element);
     }
 }
@@ -545,6 +686,59 @@ let GUI = {
                 render_image();
             });
 
+        this.num_colors = new Slider(
+            "Number of colors:",
+            "num_colors",
+            basic_options,
+            5,
+            1, 10,
+            () => { render_image(); },
+            1
+        );
+
+        // Frame shape and dimensions (in 0.5 cm increments)
+        const defaultCircleDiameterCm = 76.2; // 30 inches
+        this.frame_shape = new Select(
+            "Frame shape:",
+            "frame_shape",
+            basic_options,
+            [
+                { value: "circle", label: "Circle" },
+                { value: "rectangle", label: "Rectangle" }
+            ],
+            "circle",
+            () => { this.updateFrameControls(); render_image(); }
+        );
+        this.circle_diameter_cm = new Slider(
+            "Circle diameter (cm):",
+            "circle_diameter_cm",
+            basic_options,
+            defaultCircleDiameterCm,
+            5, 200,
+            () => { render_image(); },
+            0.5
+        );
+        this.rect_width_cm = new Slider(
+            "Rectangle width (cm):",
+            "rect_width_cm",
+            basic_options,
+            60,
+            5, 300,
+            () => { render_image(); },
+            0.5
+        );
+        this.rect_height_cm = new Slider(
+            "Rectangle height (cm):",
+            "rect_height_cm",
+            basic_options,
+            40,
+            5, 300,
+            () => { render_image(); },
+            0.5
+        );
+
+        this.updateFrameControls();
+
         // Advanced 
         this.shape_entry = new TextEntry(
             "Frame path (SVG):",
@@ -554,10 +748,34 @@ let GUI = {
             (e) => {
 
             });
+    },
+    updateFrameControls() {
+        const isCircle = this.frame_shape.element.value === "circle";
+        const setSliderVisible = (slider, visible) => {
+            const disp = visible ? "block" : "none";
+            if (slider.label) slider.label.style.display = disp;
+            if (slider.disp) slider.disp.style.display = disp;
+            if (slider.element) slider.element.style.display = disp;
+            if (slider.number) slider.number.style.display = disp;
+        };
+        setSliderVisible(this.circle_diameter_cm, isCircle);
+        setSliderVisible(this.rect_width_cm, !isCircle);
+        setSliderVisible(this.rect_height_cm, !isCircle);
     }
 }
 
 GUI.init();
+debugLog('Debug panel initialized');
+
+// Global JS error hooks to surface issues in the debug panel
+window.addEventListener('error', function (e) {
+    debugLog('window.error', { message: e.message, source: e.filename, line: e.lineno, col: e.colno });
+});
+window.addEventListener('unhandledrejection', function (e) {
+    debugLog('unhandledrejection', { reason: (e.reason && (e.reason.stack || e.reason.message)) || String(e.reason) });
+});
+
+// Debug panel toggle removed
 
 /**
 * IMAGE PROCESSING
@@ -571,40 +789,53 @@ function render_image(url) {
     }
     graph.init();
     var img = document.getElementById('snapshot');
-    img.onload = () => {
-        if (url) URL.revokeObjectURL(img.src);
-    }
-    if (url)
-        img.src = url;
-    else
-        img.src = img.src;
+    debugLog('Begin render', { url: !!url });
+    // Ensure handlers are attached before setting src
     img.onload = function () {
+        debugLog('Image loaded', { width: img.width, height: img.height });
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
 
         // Bunch of sloppy logic to resize the image / canvas to play nice with the frame bounding box.
         // The image is centered and scaled to fill the frame
-        const max_res = ((graph.frame_bb.width / graph.thread_diam) / 2) / graph.downscale_factor;
+        let max_res = ((graph.frame_bb.width / graph.thread_diam) / 2) / graph.downscale_factor;
+        if (!Number.isFinite(max_res) || max_res <= 1) {
+            debugLog('max_res invalid, using fallback', { max_res, frame_bb: graph.frame_bb, thread_diam: graph.thread_diam });
+            max_res = 400;
+        }
         //const max_res = 400;
         let frame_ar = graph.frame_bb.width / graph.frame_bb.height;
         let img_ar = img.width / img.height;
-        canvas.width = frame_ar >= 1 ? max_res : max_res * frame_ar;
-        canvas.height = frame_ar < 1 ? max_res : max_res / frame_ar;
+        canvas.width = Math.max(2, Math.round(frame_ar >= 1 ? max_res : max_res * frame_ar));
+        canvas.height = Math.max(2, Math.round(frame_ar < 1 ? max_res : max_res / frame_ar));
         let w = frame_ar >= img_ar ? canvas.width : canvas.height * img_ar;
         let h = frame_ar < img_ar ? canvas.height : canvas.width / img_ar;
         ctx.drawImage(img, - (w - canvas.width) / 2, - (h - canvas.height) / 2, w, h);
         let new_img = new Image(ctx, canvas.width, canvas.height);
         graph.setup(new_img);
-        graph.parse_image();
-    }
+        try {
+            graph.parse_image();
+        } catch (e) {
+            debugLog('parse_image threw', { error: e && (e.stack || e.message || String(e)) });
+        }
+        debugLog('Render started', { frameAR: frame_ar.toFixed(3), imgAR: img_ar.toFixed(3), canvas: { w: canvas.width, h: canvas.height } });
+        if (url) URL.revokeObjectURL(img.src);
+    };
+    img.onerror = function (e) { debugLog('Image load error', { error: e.message || String(e) }); };
+    if (url) img.src = url; else img.src = img.src;
 }
 
 render_image();
 
+
 const input = document.querySelector("input");
 input.addEventListener("change", function () {
     if (this.files && this.files[0]) {
-        render_image(URL.createObjectURL(this.files[0]));
+        const url = URL.createObjectURL(this.files[0]);
+        debugLog('File selected', { name: this.files[0].name, type: this.files[0].type, size: this.files[0].size });
+        render_image(url);
+    } else {
+        debugLog('No file selected');
     }
 })
 
