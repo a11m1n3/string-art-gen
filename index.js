@@ -61,22 +61,41 @@ function hslToRgb(h, s, l) {
 function generatePalette(numColors) {
     const colors = [];
     const n = parseInt(numColors);
+    const useBlackBg = graph && graph.use_black_background;
+    
     if (n <= 0) return colors;
-    if (n === 1) return [new Color(0, 0, 0, 255)];
-    if (n === 2) return [new Color(0, 0, 0, 255), new Color(255, 255, 255, 255)];
-    if (n === 3) return [new Color(255, 0, 0, 255), new Color(0, 255, 0, 255), new Color(0, 0, 255, 255)];
+    if (n === 1) return useBlackBg ? [new Color(255, 255, 255, 255)] : [new Color(0, 0, 0, 255)];
+    if (n === 2) return useBlackBg ? [new Color(255, 255, 255, 255), new Color(128, 128, 128, 255)] : [new Color(0, 0, 0, 255), new Color(255, 255, 255, 255)];
+    if (n === 3) return useBlackBg ? [new Color(255, 0, 0, 255), new Color(0, 255, 0, 255), new Color(0, 0, 255, 255)] : [new Color(255, 0, 0, 255), new Color(0, 255, 0, 255), new Color(0, 0, 255, 255)];
     if (n === 5) return [
         new Color(0, 255, 255, 255),
         new Color(255, 0, 255, 255),
         new Color(255, 255, 0, 255),
-        new Color(0, 0, 0, 255),
+        ...(useBlackBg ? [] : [new Color(0, 0, 0, 255)]),
         new Color(255, 255, 255, 255)
     ];
+    
+    // For larger palettes, generate colors but exclude very dark ones if using black background
     for (let i = 0; i < n; i++) {
         const h = (i / n) * 360;
-        const { r, g, b } = hslToRgb(h, 1, 0.5);
+        const lightness = useBlackBg ? 0.6 : 0.5; // Lighter colors for black background
+        const { r, g, b } = hslToRgb(h, 1, lightness);
+        
+        // Skip very dark colors when using black background
+        if (useBlackBg && (r + g + b) < 150) {
+            continue;
+        }
+        
         colors.push(new Color(r, g, b, 255));
     }
+    
+    // If we filtered out too many colors, add some bright ones
+    while (useBlackBg && colors.length < n) {
+        const h = Math.random() * 360;
+        const { r, g, b } = hslToRgb(h, 1, 0.7);
+        colors.push(new Color(r, g, b, 255));
+    }
+    
     return colors;
 }
 
@@ -288,6 +307,7 @@ let graph = {
 
         this.thread_opacity = 1.0;
         this.thread_order = [];
+        this.use_black_background = false;
 
         // Clear existing SVG if it exists
         d3.select("svg").remove();
@@ -407,7 +427,7 @@ let graph = {
 
         this.get_frame_url();
         debugLog('Frame ready', { shape: shape, viewBox: { w: this.width, h: this.height }, nails: this.num_nails });
-        frame_path.style("fill", "grey");
+        frame_path.style("fill", this.use_black_background ? "black" : "grey");
 
         // Handle zooming and panning
         let zoom = d3.zoom().on('zoom', handleZoom);
@@ -504,7 +524,7 @@ let graph = {
         current_canvas.height = img.height;
         this.scratch_ctx = scratch_canvas.getContext('2d');
         this.current_ctx = current_canvas.getContext('2d', { willReadFrequently: true });
-        this.current_ctx.fillStyle = "grey";
+        this.current_ctx.fillStyle = this.use_black_background ? "black" : "grey";
         this.current_ctx.fillRect(0, 0, this.img.width, this.img.height);
         this.orig_ctx_data = this.orig_ctx.getImageData(0, 0, this.img.width, this.img.height).data;
         this.current_ctx_data = this.current_ctx.getImageData(0, 0, this.img.width, this.img.height).data;
@@ -778,6 +798,17 @@ let GUI = {
 
         this.updateFrameControls();
 
+        this.black_background = new Button(
+            "Black Background",
+            "black_background",
+            basic_options,
+            () => {
+                graph.use_black_background = !graph.use_black_background;
+                this.black_background.element.innerHTML = graph.use_black_background ? 
+                    "<b>White Background</b>" : "<b>Black Background</b>";
+                render_image();
+            });
+
         // Advanced 
         this.shape_entry = new TextEntry(
             "Frame path (SVG):",
@@ -821,6 +852,15 @@ window.addEventListener('unhandledrejection', function (e) {
  */
 
 function render_image(url) {
+    // Update page background color based on black background setting
+    if (graph && graph.use_black_background) {
+        document.documentElement.style.setProperty('--bg-color', '#000000');
+        document.body.style.backgroundColor = '#000000';
+    } else {
+        document.documentElement.style.setProperty('--bg-color', '#141414');
+        document.body.style.backgroundColor = '#141414';
+    }
+    
     if (graph.svg) {
         graph.svg.selectAll("*").remove();
         graph.svg.remove();
