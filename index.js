@@ -275,8 +275,8 @@ let graph = {
             this.width = this.rect_w_in + pad * 2;
             this.height = this.rect_h_in + pad * 2;
         }
-        this.max_iter = GUI.num_connections.element.value;
-        this.num_nails = GUI.num_nails.element.value;
+        this.max_iter = GUI.num_connections ? GUI.num_connections.element.value : 10000;
+        this.num_nails = GUI.num_nails ? GUI.num_nails.element.value : 300;
 
         this.downscale_factor = 4;
 
@@ -289,22 +289,27 @@ let graph = {
         this.thread_opacity = 1.0;
         this.thread_order = [];
 
+        // Clear existing SVG if it exists
+        d3.select("svg").remove();
+        
         this.svg = d3.select("body").insert("svg", ":first-child")
             .attr("width", "100vw")
             .attr("viewBox", [-this.width / 2, -this.height / 2, this.width, this.height])
-        this.svg.append("g");
         this.svg.attr("desc", "Created using michael-crum.com/string-art-gen");
 
+        // Create main group
+        const mainGroup = this.svg.append("g");
+        
         let frame_path;
         if (shape === "circle") {
-            frame_path = this.svg.select("g")
+            frame_path = mainGroup
                 .append("circle")
                 .attr("r", this.radius)
                 .style("stroke", "#ffbe5700")
                 .style("stroke-width", 10)
                 .style("fill", "none");
         } else {
-            frame_path = this.svg.select("g")
+            frame_path = mainGroup
                 .append("rect")
                 .attr("width", this.rect_w_in)
                 .attr("height", this.rect_h_in)
@@ -315,42 +320,76 @@ let graph = {
                 .style("fill", "none");
         }
 
-        // let frame_path = this.svg.append("g")
-        //     .lower()
-        //     .append("rect")
-        //     .attr("class", "frame")
-        //     .attr("height", 19.25)
-        //     .attr("width", 15.25)
-        //     .attr("x", -this.radius)
-        //     .attr("y", -this.radius)
-        //     .style("stroke", "#ffbe5700")
-        //     .style("stroke-width", 0.5)
-        //     .style("fill", "none");
-
         this.frame_bb = frame_path.node().getBBox();
+        debugLog('Frame bounding box', this.frame_bb);
 
         let nails_lst = [];
         for (let i = 0; i < this.num_nails; i++) {
             nails_lst.push(i);
         }
+        
         let frame_length = 0;
         try {
             frame_length = frame_path.node().getTotalLength();
+            debugLog('Frame length calculated', { length: frame_length });
         } catch (e) {
             debugLog('Failed to get frame length', { error: e && (e.message || String(e)) });
-            frame_length = 1;
+            // Fallback calculation for frame length
+            if (shape === "circle") {
+                frame_length = 2 * Math.PI * this.radius;
+            } else {
+                frame_length = 2 * (this.rect_w_in + this.rect_h_in);
+            }
+            debugLog('Using fallback frame length', { length: frame_length });
         }
 
         // Append nails evenly around the frame, and store their locations in a list
-        let nails = this.svg.select("g")
+        let nails = mainGroup
             .selectAll("circle.nail")
             .data(nails_lst)
-            .join("g")
-            .attr("transform", (d) => {
-                let pos = frame_path.node().getPointAtLength((d / this.num_nails) * frame_length);
+            .join("g");
+            
+        nails.attr("transform", (d) => {
+            let pos;
+            try {
+                pos = frame_path.node().getPointAtLength((d / this.num_nails) * frame_length);
+            } catch (e) {
+                // Fallback position calculation
+                if (shape === "circle") {
+                    const angle = (d / this.num_nails) * 2 * Math.PI;
+                    pos = {
+                        x: this.radius * Math.cos(angle),
+                        y: this.radius * Math.sin(angle)
+                    };
+                } else {
+                    // Rectangle perimeter calculation
+                    const perimeter = 2 * (this.rect_w_in + this.rect_h_in);
+                    const distance = (d / this.num_nails) * perimeter;
+                    const w = this.rect_w_in;
+                    const h = this.rect_h_in;
+                    
+                    if (distance <= w) {
+                        // Top edge
+                        pos = { x: -w/2 + distance, y: -h/2 };
+                    } else if (distance <= w + h) {
+                        // Right edge
+                        pos = { x: w/2, y: -h/2 + (distance - w) };
+                    } else if (distance <= 2*w + h) {
+                        // Bottom edge
+                        pos = { x: w/2 - (distance - w - h), y: h/2 };
+                    } else {
+                        // Left edge
+                        pos = { x: -w/2, y: h/2 - (distance - 2*w - h) };
+                    }
+                }
+            }
+            if (pos) {
                 this.nails_pos.push(new Point(pos.x, pos.y));
                 return `translate(${pos.x}, ${pos.y})`;
-            });
+            }
+            return `translate(0, 0)`;
+        });
+        
         nails.append("circle")
             .attr("class", "nail")
             .attr("r", this.nail_diam / 2)
